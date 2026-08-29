@@ -1,0 +1,1195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>JARVIS // 3D Car Part Inspector</title>
+<style>
+  /* ============================================================
+     JARVIS HUD — Sci-Fi Glassmorphism Theme
+     ============================================================ */
+  :root {
+    --cyan: #00e5ff;
+    --cyan-dim: rgba(0, 229, 255, 0.35);
+    --cyan-glow: rgba(0, 229, 255, 0.12);
+    --bg-dark: #04070d;
+    --panel-bg: rgba(6, 16, 26, 0.72);
+    --text: #d8f6ff;
+    --text-dim: #6fa8b8;
+    --danger: #ff3b57;
+    --ok: #2bff9e;
+    --warn: #ffc400;
+    --mono: 'Consolas', 'SF Mono', 'Menlo', monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: var(--bg-dark);
+    font-family: var(--mono);
+    color: var(--text);
+  }
+
+  #scene-canvas { position: fixed; inset: 0; display: block; }
+
+  /* ---------- Scanline / vignette overlay ---------- */
+  #fx-overlay {
+    position: fixed; inset: 0; pointer-events: none; z-index: 5;
+    background:
+      repeating-linear-gradient(0deg, rgba(0,229,255,0.02) 0 1px, transparent 1px 3px),
+      radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.55) 100%);
+  }
+
+  /* ---------- Top HUD bar ---------- */
+  #top-bar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 24px;
+    pointer-events: none;
+    text-transform: uppercase; letter-spacing: 3px; font-size: 11px;
+  }
+  #top-bar .brand { color: var(--cyan); text-shadow: 0 0 12px var(--cyan-dim); }
+  #top-bar .brand::before { content: '◈ '; }
+  #top-bar .clock { color: var(--text-dim); }
+  #top-bar .clock b { color: var(--text); font-weight: normal; }
+
+  /* ---------- Corner brackets ---------- */
+  .corner {
+    position: fixed; width: 42px; height: 42px; z-index: 9;
+    border: 2px solid var(--cyan-dim); pointer-events: none;
+    animation: cornerPulse 3s ease-in-out infinite;
+  }
+  .corner.tl { top: 52px; left: 16px;  border-right: 0; border-bottom: 0; }
+  .corner.tr { top: 52px; right: 16px; border-left: 0;  border-bottom: 0; }
+  .corner.bl { bottom: 16px; left: 16px;  border-right: 0; border-top: 0; }
+  .corner.br { bottom: 16px; right: 16px; border-left: 0; border-top: 0; }
+  @keyframes cornerPulse {
+    0%, 100% { opacity: 0.35; } 50% { opacity: 1; }
+  }
+
+  /* ---------- Bottom-left control cluster ---------- */
+  #controls {
+    position: fixed; left: 24px; bottom: 28px; z-index: 10;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .hud-btn {
+    pointer-events: auto;
+    background: var(--panel-bg);
+    border: 1px solid var(--cyan-dim);
+    color: var(--cyan);
+    font-family: var(--mono); font-size: 11px;
+    letter-spacing: 2px; text-transform: uppercase;
+    padding: 10px 18px; min-width: 180px; text-align: left;
+    cursor: pointer; position: relative;
+    backdrop-filter: blur(8px);
+    transition: all 0.25s ease;
+    clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+  }
+  .hud-btn:hover {
+    background: var(--cyan-glow);
+    box-shadow: 0 0 18px var(--cyan-dim), inset 0 0 18px var(--cyan-glow);
+    color: #fff;
+  }
+  .hud-btn.active {
+    background: var(--cyan); color: #001318; font-weight: bold;
+    box-shadow: 0 0 24px var(--cyan-dim);
+  }
+  .hud-btn::before { content: '▸ '; }
+
+  /* ---------- Background color popup ---------- */
+  #bg-pop {
+    display: none; flex-direction: column; gap: 10px;
+    background: var(--panel-bg);
+    border: 1px solid var(--cyan-dim);
+    backdrop-filter: blur(8px);
+    padding: 12px;
+    width: 200px;
+    clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+  }
+  #bg-pop.open { display: flex; }
+  .bg-pop-title {
+    font-size: 9px; letter-spacing: 3px; color: var(--text-dim);
+    text-transform: uppercase;
+  }
+  .swatches {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px;
+    justify-items: center;
+  }
+  .swatch {
+    width: 27px; height: 27px; border-radius: 50%;
+    border: 1px solid rgba(0,229,255,0.35);
+    background: var(--sw); cursor: pointer; padding: 0;
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+  .swatch:hover { transform: scale(1.15); box-shadow: 0 0 12px var(--sw); }
+  .swatch.selected { outline: 2px solid var(--cyan); outline-offset: 2px; }
+  .custom-row {
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 10px; letter-spacing: 1px; color: var(--text-dim);
+    text-transform: uppercase; cursor: pointer;
+  }
+  #bg-picker {
+    width: 44px; height: 26px; padding: 0;
+    border: 1px solid var(--cyan-dim); background: transparent;
+    cursor: pointer;
+  }
+
+  /* ---------- Spec side panel (flies in) ---------- */
+  #spec-panel {
+    position: fixed; top: 70px; right: -420px; bottom: 90px; width: 360px;
+    z-index: 20;
+    background: var(--panel-bg);
+    border: 1px solid var(--cyan-dim);
+    border-right: 0;
+    backdrop-filter: blur(14px);
+    padding: 26px 24px;
+    display: flex; flex-direction: column; gap: 16px;
+    transition: right 0.5s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.4s ease;
+    opacity: 0;
+    clip-path: polygon(0 0, 100% 0, 100% calc(100% - 28px), calc(100% - 28px) 100%, 0 100%);
+    box-shadow: -10px 0 40px rgba(0, 229, 255, 0.08);
+    overflow-y: auto;
+  }
+  #spec-panel.open { right: 24px; opacity: 1; }
+
+  #spec-panel .panel-tag {
+    font-size: 9px; letter-spacing: 4px; color: var(--text-dim);
+    text-transform: uppercase;
+  }
+  #spec-close {
+    position: absolute; top: 14px; right: 14px;
+    width: 28px; height: 28px;
+    background: transparent; border: 1px solid var(--cyan-dim);
+    color: var(--cyan); cursor: pointer; font-family: var(--mono);
+    font-size: 13px; line-height: 1;
+    transition: all 0.2s;
+  }
+  #spec-close:hover {
+    background: var(--danger); border-color: var(--danger); color: #fff;
+    box-shadow: 0 0 14px rgba(255,59,87,0.6);
+    transform: rotate(90deg);
+  }
+  #spec-name {
+    font-size: 22px; color: #fff; text-transform: uppercase;
+    letter-spacing: 2px; text-shadow: 0 0 16px var(--cyan-dim);
+    padding-right: 30px;
+  }
+  #spec-id { font-size: 10px; color: var(--cyan); letter-spacing: 3px; }
+
+  .spec-divider {
+    height: 1px; flex-shrink: 0;
+    background: linear-gradient(90deg, var(--cyan), transparent);
+    opacity: 0.5;
+  }
+
+  /* Spec rows */
+  .spec-row {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+    font-size: 12px; padding: 4px 0;
+    border-bottom: 1px dashed rgba(0,229,255,0.12);
+  }
+  .spec-row .k { color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; font-size: 10px; }
+  .spec-row .v { color: var(--text); text-align: right; }
+  .spec-row .v.hl { color: var(--cyan); text-shadow: 0 0 8px var(--cyan-dim); }
+
+  /* Status pill */
+  .status-pill {
+    align-self: flex-start;
+    padding: 5px 14px; font-size: 10px; letter-spacing: 3px;
+    text-transform: uppercase; border: 1px solid;
+    animation: pillGlow 2s ease-in-out infinite;
+  }
+  @keyframes pillGlow {
+    0%, 100% { box-shadow: 0 0 6px currentColor; } 50% { box-shadow: 0 0 18px currentColor; }
+  }
+
+  /* Animated bars (wear / temperature) */
+  .bar-wrap { margin-top: 2px; }
+  .bar-track {
+    height: 6px; background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(0,229,255,0.15); position: relative; overflow: hidden;
+  }
+  .bar-fill {
+    height: 100%; width: 0%;
+    background: linear-gradient(90deg, var(--cyan), #7df9ff);
+    box-shadow: 0 0 10px var(--cyan-dim);
+    transition: width 1s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .bar-fill.warn { background: linear-gradient(90deg, var(--warn), #ffde7a); }
+  .bar-fill.bad  { background: linear-gradient(90deg, var(--danger), #ff8a9a); }
+
+  /* Teletype readout at panel bottom */
+  .tech-ticker {
+    margin-top: auto; font-size: 9px; color: var(--text-dim);
+    letter-spacing: 1px; line-height: 1.8; flex-shrink: 0;
+    border-top: 1px solid rgba(0,229,255,0.15); padding-top: 10px;
+    white-space: pre-line;
+  }
+  .tech-ticker .cursor { animation: blink 1s steps(1) infinite; color: var(--cyan); }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* ---------- Hint ---------- */
+  #hint {
+    position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%);
+    z-index: 8; font-size: 10px; letter-spacing: 3px; text-transform: uppercase;
+    color: var(--text-dim); pointer-events: none;
+    animation: hintFade 3s ease-in-out infinite;
+  }
+  @keyframes hintFade { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
+
+  /* Target reticle tracking the selected part (projected to 2D) */
+  #reticle {
+    position: fixed; width: 56px; height: 56px; z-index: 7;
+    border: 1px solid var(--cyan); border-radius: 50%;
+    pointer-events: none; opacity: 0;
+    transition: opacity 0.3s;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 20px var(--cyan-dim), inset 0 0 14px var(--cyan-glow);
+  }
+  #reticle::after {
+    content: ''; position: absolute; inset: 12px;
+    border: 1px dashed var(--cyan-dim); border-radius: 50%;
+    animation: reticleSpin 6s linear infinite;
+  }
+  @keyframes reticleSpin { to { transform: rotate(360deg); } }
+  #reticle.locked { opacity: 1; }
+
+  @media (max-width: 640px) {
+    #spec-panel { width: calc(100vw - 48px); }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="scene-canvas"></canvas>
+<div id="fx-overlay"></div>
+
+<!-- Top HUD -->
+<div id="top-bar">
+  <div class="brand">JARVIS // Automotive Diagnostic Interface</div>
+  <div class="clock">SYS.TIME <b id="clock">--:--:--</b></div>
+</div>
+
+<!-- Frame corners -->
+<div class="corner tl"></div><div class="corner tr"></div>
+<div class="corner bl"></div><div class="corner br"></div>
+
+<!-- Controls -->
+<div id="controls">
+  <div id="bg-pop">
+    <div class="bg-pop-title">Background</div>
+    <div class="swatches">
+      <button class="swatch selected" data-bg="#04070d" style="--sw:#04070d" title="Deep Space"></button>
+      <button class="swatch" data-bg="#000000" style="--sw:#000000" title="Void"></button>
+      <button class="swatch" data-bg="#061024" style="--sw:#061024" title="Midnight"></button>
+      <button class="swatch" data-bg="#120a24" style="--sw:#120a24" title="Nebula"></button>
+      <button class="swatch" data-bg="#04140f" style="--sw:#04140f" title="Emerald"></button>
+      <button class="swatch" data-bg="#1a0a08" style="--sw:#1a0a08" title="Ember"></button>
+      <button class="swatch" data-bg="#0a1a2a" style="--sw:#0a1a2a" title="Steel"></button>
+      <button class="swatch" data-bg="#231016" style="--sw:#231016" title="Crimson"></button>
+    </div>
+    <label class="custom-row">Custom <input type="color" id="bg-picker" value="#04070d" /></label>
+  </div>
+  <button class="hud-btn" id="btn-bg">Background Color</button>
+  <button class="hud-btn" id="btn-explode">Explode View</button>
+  <button class="hud-btn" id="btn-auto-rotate">Auto Rotate</button>
+  <button class="hud-btn" id="btn-reset">Reset Camera</button>
+</div>
+
+<div id="hint">Click a component to analyze</div>
+<div id="reticle"></div>
+
+<!-- Spec panel -->
+<aside id="spec-panel">
+  <button id="spec-close" title="Close">✕</button>
+  <div class="panel-tag">Component Analysis</div>
+  <h2 id="spec-name">—</h2>
+  <div id="spec-id">ID: —</div>
+  <div class="status-pill" id="spec-status">—</div>
+  <div class="spec-divider"></div>
+  <div id="spec-rows"></div>
+  <div class="spec-divider"></div>
+  <div class="bar-wrap">
+    <div class="spec-row"><span class="k">Wear Level</span><span class="v" id="wear-val">0%</span></div>
+    <div class="bar-track"><div class="bar-fill" id="wear-bar"></div></div>
+  </div>
+  <div class="bar-wrap">
+    <div class="spec-row"><span class="k">Temperature</span><span class="v" id="temp-val">0°C</span></div>
+    <div class="bar-track"><div class="bar-fill" id="temp-bar"></div></div>
+  </div>
+  <div class="tech-ticker" id="tech-ticker"></div>
+</aside>
+
+<!-- Import map: resolves bare "three" specifiers used inside three/addons -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+/* ================================================================
+   JARVIS 3D Car Part Inspector
+   Three.js ES modules via CDN + import map — no build step needed.
+   ================================================================ */
+import * as THREE from 'three';
+import { OrbitControls }  from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass }     from 'three/addons/postprocessing/RenderPass.js';
+import { OutlinePass }    from 'three/addons/postprocessing/OutlinePass.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+/* ---------------------------------------------------------------
+   1. RENDERER / SCENE / CAMERA
+   --------------------------------------------------------------- */
+const canvas   = document.getElementById('scene-canvas');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;   // filmic response for metals
+renderer.toneMappingExposure = 1.15;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x04070d);
+scene.fog = new THREE.FogExp2(0x04070d, 0.028);
+
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 200);
+const HOME_POS = new THREE.Vector3(5.2, 3.4, 6.0);
+const HOME_TARGET = new THREE.Vector3(0, 0.6, 0);
+camera.position.copy(HOME_POS);
+
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.target.copy(HOME_TARGET);
+controls.minDistance = 2.5;
+controls.maxDistance = 18;
+
+/* ---------------------------------------------------------------
+   2. LIGHTING — subtle sci-fi studio
+   --------------------------------------------------------------- */
+/* Image-based lighting: procedural studio reflections for realistic metals */
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
+pmrem.dispose();
+
+scene.add(new THREE.AmbientLight(0x334455, 0.35));
+
+const keyLight = new THREE.DirectionalLight(0xffffff, 1.8);
+keyLight.position.set(6, 10, 6);
+keyLight.castShadow = true;
+keyLight.shadow.mapSize.set(2048, 2048);
+keyLight.shadow.camera.near = 1;
+keyLight.shadow.camera.far = 30;
+keyLight.shadow.bias = -0.0003;
+keyLight.shadow.normalBias = 0.03;
+scene.add(keyLight);
+
+const rimCyan = new THREE.DirectionalLight(0x00e5ff, 0.9);
+rimCyan.position.set(-8, 3, -6);
+scene.add(rimCyan);
+
+const fillMagenta = new THREE.PointLight(0xff2d78, 0.5, 30);
+fillMagenta.position.set(5, -3, -5);
+scene.add(fillMagenta);
+
+/* ---------------------------------------------------------------
+   3. GRID FLOOR
+   --------------------------------------------------------------- */
+/* Grid is rebuilt when the background changes so the lines always contrast */
+let grid = null;
+function buildGrid(brightBg) {
+  if (grid) {
+    scene.remove(grid);
+    grid.geometry.dispose();
+    grid.material.dispose();
+  }
+  grid = new THREE.GridHelper(
+    40, 40,
+    brightBg ? 0x007788 : 0x00e5ff,
+    brightBg ? 0x1c2f38 : 0x0a2030);
+  grid.material.transparent = true;
+  grid.material.opacity = brightBg ? 0.45 : 0.25;
+  scene.add(grid);
+}
+buildGrid(false);
+
+/* Soft contact-shadow catcher under the model */
+const shadowPlane = new THREE.Mesh(
+  new THREE.CircleGeometry(6, 48),
+  new THREE.ShadowMaterial({ opacity: 0.35 })
+);
+shadowPlane.rotation.x = -Math.PI / 2;
+shadowPlane.position.y = 0.02;
+shadowPlane.receiveShadow = true;
+scene.add(shadowPlane);
+
+/* ---------------------------------------------------------------
+   4. PROCEDURAL CAR PARTS
+   Each part is a THREE.Group. userData holds name/id/specs/status
+   which drive the HUD panel. Each child mesh has an `explodeDir`
+   vector used by the exploded-view animation.
+   --------------------------------------------------------------- */
+const carModel = new THREE.Group();
+scene.add(carModel);
+
+/* --- Procedural canvas textures (no external assets needed) --- */
+function makeTexture(size, paint, repeat = 1) {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = size;
+  paint(cv.getContext('2d'), size);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(repeat, repeat);
+  tex.anisotropy = 8;
+  return tex;
+}
+
+/* Fine horizontal streaks — brushed-metal roughness variation */
+const brushedTex = makeTexture(256, (ctx, s) => {
+  ctx.fillStyle = '#808080';
+  ctx.fillRect(0, 0, s, s);
+  for (let i = 0; i < 1500; i++) {
+    const g = 90 + (Math.random() * 90 | 0);
+    ctx.strokeStyle = `rgb(${g},${g},${g})`;
+    const y = Math.random() * s;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(s, y + (Math.random() - 0.5) * 3);
+    ctx.stroke();
+  }
+}, 2);
+
+/* Twill carbon-fibre weave */
+const carbonTex = makeTexture(128, (ctx, s) => {
+  const cell = s / 8;
+  for (let y = 0; y < 8; y++) {
+    for (let x = 0; x < 8; x++) {
+      const weave = (x + y) % 2 === 0;
+      const g = weave ? 26 : 52;
+      ctx.fillStyle = `rgb(${g},${g + 4},${g + 8})`;
+      ctx.fillRect(x * cell, y * cell, cell, cell);
+      ctx.fillStyle = 'rgba(255,255,255,0.09)';
+      ctx.fillRect(x * cell, y * cell, weave ? cell : cell / 2, weave ? cell / 2 : cell);
+    }
+  }
+}, 6);
+carbonTex.colorSpace = THREE.SRGBColorSpace;
+
+/* Grainy rubber surface for the tire bump map */
+const tireBump = makeTexture(256, (ctx, s) => {
+  ctx.fillStyle = '#808080';
+  ctx.fillRect(0, 0, s, s);
+  for (let i = 0; i < 3500; i++) {
+    const g = 60 + (Math.random() * 120 | 0);
+    ctx.fillStyle = `rgb(${g},${g},${g})`;
+    ctx.fillRect(Math.random() * s, Math.random() * s, 2, 2);
+  }
+}, 4);
+
+const MATERIALS = {
+  steel:      new THREE.MeshPhysicalMaterial({ color: 0xb8c2cb, metalness: 1.0, roughness: 0.45, roughnessMap: brushedTex, envMapIntensity: 0.9 }),
+  lightAlloy: new THREE.MeshPhysicalMaterial({ color: 0x9aa5ad, metalness: 1.0, roughness: 0.28, envMapIntensity: 1.0 }),
+  darkSteel:  new THREE.MeshPhysicalMaterial({ color: 0x4a545c, metalness: 0.9,  roughness: 0.5,  envMapIntensity: 0.6 }),
+  disc:       new THREE.MeshPhysicalMaterial({ color: 0x8a959d, metalness: 1.0,  roughness: 0.5,  roughnessMap: brushedTex, envMapIntensity: 1.0 }),
+  rubber:     new THREE.MeshPhysicalMaterial({ color: 0x111417, metalness: 0.0,  roughness: 0.92, bumpMap: tireBump, bumpScale: 0.02, envMapIntensity: 0.25 }),
+  carbon:     new THREE.MeshPhysicalMaterial({ color: 0xffffff, map: carbonTex, metalness: 0.35, roughness: 0.42, clearcoat: 1.0, clearcoatRoughness: 0.18, envMapIntensity: 0.8 }),
+  caliper:    new THREE.MeshPhysicalMaterial({ color: 0xc41e3a, metalness: 0.55, roughness: 0.32, clearcoat: 0.9, clearcoatRoughness: 0.2, envMapIntensity: 0.9 }),
+  chrome:     new THREE.MeshPhysicalMaterial({ color: 0xdde3e8, metalness: 1.0, roughness: 0.12, envMapIntensity: 1.2 }),
+};
+
+/* Rounded-rectangle Shape helper for extruded cast-metal parts */
+function roundedRectShape(w, h, r) {
+  const s = new THREE.Shape();
+  const x = -w / 2, y = -h / 2;
+  s.moveTo(x + r, y);
+  s.lineTo(x + w - r, y);
+  s.quadraticCurveTo(x + w, y, x + w, y + r);
+  s.lineTo(x + w, y + h - r);
+  s.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  s.lineTo(x + r, y + h);
+  s.quadraticCurveTo(x, y + h, x, y + h - r);
+  s.lineTo(x, y + r);
+  s.quadraticCurveTo(x, y, x + r, y);
+  return s;
+}
+
+/** Create a selectable sub-part group carrying HUD metadata */
+function makePart(name, id, specs, status) {
+  const g = new THREE.Group();
+  g.userData = { isPart: true, name, id, specs, status };
+  return g;
+}
+
+/* ---- PART: Brake Disc ---- */
+const discPart = makePart('Brake Disc', 'BRK-DSC-042', {
+  'Material': 'Carbon-Ceramic Composite',
+  'Diameter': '380 mm',
+  'Thickness': '34 mm',
+  'Slots': '48 / Curved J-hook',
+  'Torque Rating': '1,850 N·m',
+}, { label: 'Nominal', color: 'var(--ok)' });
+{
+  const insetMat = new THREE.MeshBasicMaterial({ color: 0x05080a });
+
+  /* Vented rotor: two friction faces + internal vanes + drillings + slots */
+  const rotor = new THREE.Group();
+  rotor.userData.explodeDir = new THREE.Vector3(0, 1, 0);
+  const faceGeo = new THREE.CylinderGeometry(1.15, 1.15, 0.05, 64);
+  for (const zs of [0.055, -0.055]) {
+    const face = new THREE.Mesh(faceGeo, MATERIALS.disc);
+    face.rotation.x = Math.PI / 2;
+    face.position.z = zs;
+    rotor.add(face);
+  }
+  const vaneGeo = new THREE.BoxGeometry(0.62, 0.022, 0.06);
+  for (let i = 0; i < 28; i++) {
+    const a = (i / 28) * Math.PI * 2;
+    const vane = new THREE.Mesh(vaneGeo, MATERIALS.darkSteel);
+    vane.position.set(Math.cos(a) * 0.8, Math.sin(a) * 0.8, 0);
+    vane.rotation.z = a;
+    rotor.add(vane);
+  }
+  // Curved J-hook slots on the outboard face
+  const slotGeo = new THREE.TorusGeometry(0.85, 0.013, 6, 20, 0.95);
+  for (let i = 0; i < 8; i++) {
+    const slot = new THREE.Mesh(slotGeo, insetMat);
+    slot.position.z = 0.086;
+    slot.rotation.z = (i / 8) * Math.PI * 2;
+    rotor.add(slot);
+  }
+  // Drilled holes, two staggered rings through both faces
+  const holeGeo = new THREE.CylinderGeometry(0.035, 0.035, 0.17, 10);
+  for (let ring = 0; ring < 2; ring++) {
+    const r = ring === 0 ? 0.92 : 1.03;
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2 + ring * 0.31;
+      const hole = new THREE.Mesh(holeGeo, insetMat);
+      hole.position.set(Math.cos(a) * r, Math.sin(a) * r, 0);
+      hole.rotation.x = Math.PI / 2;
+      rotor.add(hole);
+    }
+  }
+  discPart.add(rotor);
+
+  /* Centre hat with bolt bores */
+  const hat = new THREE.Group();
+  hat.userData.explodeDir = new THREE.Vector3(0, 0.25, 1).normalize();
+  const hatDisc = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.05, 40), MATERIALS.steel);
+  hatDisc.rotation.x = Math.PI / 2;
+  hatDisc.position.z = 0.13;
+  hat.add(hatDisc);
+  const boreGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.08, 10);
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2;
+    const bore = new THREE.Mesh(boreGeo, insetMat);
+    bore.position.set(Math.cos(a) * 0.3, Math.sin(a) * 0.3, 0.13);
+    bore.rotation.x = Math.PI / 2;
+    hat.add(bore);
+  }
+  discPart.add(hat);
+
+  /* Lug bolts */
+  const lugs = new THREE.Group();
+  lugs.userData.explodeDir = new THREE.Vector3(0, 0.35, 1).normalize();
+  const lugGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.1, 6);
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2;
+    const lug = new THREE.Mesh(lugGeo, MATERIALS.chrome);
+    lug.position.set(Math.cos(a) * 0.3, Math.sin(a) * 0.3, 0.2);
+    lug.rotation.x = Math.PI / 2;
+    lugs.add(lug);
+  }
+  discPart.add(lugs);
+
+  discPart.position.set(-1.9, 0.9, 0.6);
+  discPart.rotation.y = 0.5;
+}
+
+/* ---- PART: Brake Caliper ---- */
+const caliperPart = makePart('Brake Caliper', 'CAL-6P-118', {
+  'Material': 'Forged Aluminium Alloy',
+  'Pistons': '6 / Monoblock',
+  'Pad Compound': 'Semi-Metallic S3',
+  'Clamp Force': '48 kN',
+  'Brake Line': 'Stainless Braided',
+}, { label: 'Monitor', color: 'var(--warn)' });
+{
+  /* Monoblock body: a curved arc straddling the rotor edge */
+  const body = new THREE.Group();
+  body.userData.explodeDir = new THREE.Vector3(0, 1, 0);
+  const arcGeo = new THREE.TorusGeometry(1.3, 0.16, 12, 32, 1.15);
+  arcGeo.scale(1, 1, 1.5);      // widen the bridge axially
+  arcGeo.rotateZ(0.35);         // start of the arc
+  body.add(new THREE.Mesh(arcGeo, MATERIALS.caliper));
+
+  // Stainless braided brake line curving away from the top of the arc
+  const lineCurve = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(Math.cos(1.38) * 1.3, Math.sin(1.38) * 1.3, 0),
+    new THREE.Vector3(0.55, 1.75, 0.08),
+    new THREE.Vector3(0.9, 2.2, 0.02),
+    new THREE.Vector3(1.35, 2.45, -0.05),
+  ]);
+  body.add(new THREE.Mesh(new THREE.TubeGeometry(lineCurve, 24, 0.028, 8), MATERIALS.darkSteel));
+
+  // Bleed nipple
+  const nipple = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.03, 0.12, 8), MATERIALS.chrome);
+  nipple.position.set(Math.cos(0.4) * 1.3, Math.sin(0.4) * 1.3, 0.2);
+  nipple.rotation.z = -0.25;
+  body.add(nipple);
+  caliperPart.add(body);
+
+  /* Pad backing plates riding on the rotor faces */
+  const pads = new THREE.Group();
+  pads.userData.explodeDir = new THREE.Vector3(0, 0, 1);
+  const padGeo = new THREE.TorusGeometry(1.1, 0.05, 6, 24, 0.95);
+  padGeo.scale(1, 1, 2.0);
+  padGeo.rotateZ(0.45);
+  for (const zs of [0.1, -0.1]) {
+    const pad = new THREE.Mesh(padGeo, MATERIALS.darkSteel);
+    pad.position.z = zs;
+    pads.add(pad);
+  }
+  caliperPart.add(pads);
+
+  /* Six pistons hidden inside the body (revealed when exploded) */
+  const pistons = new THREE.Group();
+  pistons.userData.explodeDir = new THREE.Vector3(1, 0.6, 0).normalize();
+  const pistonGeo = new THREE.CylinderGeometry(0.085, 0.085, 0.06, 16);
+  for (let i = 0; i < 6; i++) {
+    const a = 0.55 + i * 0.16;
+    const piston = new THREE.Mesh(pistonGeo, MATERIALS.chrome);
+    piston.position.set(Math.cos(a) * 1.22, Math.sin(a) * 1.22, 0);
+    piston.rotation.z = a + Math.PI / 2;
+    pistons.add(piston);
+  }
+  caliperPart.add(pistons);
+
+  caliperPart.position.set(-1.9, 0.9, 0.6);   // wraps the brake disc
+  caliperPart.rotation.y = 0.5;
+}
+
+/* ---- PART: V6 Engine Block (stylized) ---- */
+const enginePart = makePart('V6 Engine Block', 'ENG-V6-330', {
+  'Material': 'Cast Aluminium LSA',
+  'Displacement': '3.0 L / V6 60°',
+  'Redline': '7,200 RPM',
+  'Compression': '11.3 : 1',
+  'Output': '355 HP / 380 N·m',
+}, { label: 'Nominal', color: 'var(--ok)' });
+{
+  /* Chamfered cast block */
+  const block = new THREE.Group();
+  block.userData.explodeDir = new THREE.Vector3(0, -0.5, -0.3).normalize();
+  const blockGeo = new THREE.ExtrudeGeometry(roundedRectShape(1.7, 0.85, 0.09),
+    { depth: 1.1, bevelEnabled: true, bevelThickness: 0.04, bevelSize: 0.04, bevelSegments: 2 });
+  blockGeo.center();
+  block.add(new THREE.Mesh(blockGeo, MATERIALS.darkSteel));
+  enginePart.add(block);
+
+  /* Oil pan + drain plug */
+  const pan = new THREE.Group();
+  pan.userData.explodeDir = new THREE.Vector3(0, -1, 0);
+  const panGeo = new THREE.ExtrudeGeometry(roundedRectShape(1.3, 0.45, 0.1),
+    { depth: 0.7, bevelEnabled: true, bevelThickness: 0.03, bevelSize: 0.03, bevelSegments: 2 });
+  panGeo.center();
+  const panMesh = new THREE.Mesh(panGeo, MATERIALS.darkSteel);
+  panMesh.position.y = -0.62;
+  pan.add(panMesh);
+  const drain = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.05, 6), MATERIALS.chrome);
+  drain.position.set(0.35, -0.87, 0);
+  pan.add(drain);
+  enginePart.add(pan);
+
+  /* Carbon valve covers with ignition coils, one per bank */
+  const coverGeoBase = new THREE.ExtrudeGeometry(roundedRectShape(1.45, 0.55, 0.12),
+    { depth: 0.16, bevelEnabled: true, bevelThickness: 0.02, bevelSize: 0.02, bevelSegments: 2 });
+  coverGeoBase.translate(0, 0, -0.08);
+  const coilGeo = new THREE.CylinderGeometry(0.045, 0.045, 0.1, 12);
+  const capGeo = new THREE.BoxGeometry(0.1, 0.04, 0.1);
+  for (const side of [-1, 1]) {
+    const cover = new THREE.Group();
+    cover.position.set(-0.35, 0.52, side * 0.36);
+    cover.rotation.x = -side * Math.PI / 6;   // V-bank: outer edge tilts up
+    cover.userData.explodeDir = new THREE.Vector3(0, 0.55, side).normalize();
+    cover.add(new THREE.Mesh(coverGeoBase, MATERIALS.carbon));
+    for (let k = 0; k < 4; k++) {
+      const x = -0.5 + k * 0.33;
+      const coil = new THREE.Mesh(coilGeo, MATERIALS.darkSteel);
+      coil.position.set(x, 0.13, 0);
+      cover.add(coil);
+      const cap = new THREE.Mesh(capGeo, MATERIALS.steel);
+      cap.position.set(x, 0.19, 0);
+      cover.add(cap);
+    }
+    enginePart.add(cover);
+  }
+
+  /* Intake plenum + six runner tubes */
+  const intake = new THREE.Group();
+  intake.userData.explodeDir = new THREE.Vector3(0.4, 1, 0).normalize();
+  const plenum = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 1.0, 20), MATERIALS.steel);
+  plenum.rotation.z = Math.PI / 2;
+  plenum.position.set(0.45, 0.92, 0);
+  intake.add(plenum);
+  for (let i = 0; i < 6; i++) {
+    const side = i < 3 ? 1 : -1;
+    const x0 = 0.16 + (i % 3) * 0.28;
+    const curve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(x0, 0.9, side * 0.1),
+      new THREE.Vector3(x0, 0.78, side * 0.32),
+      new THREE.Vector3(x0 - 0.06, 0.64, side * 0.46),
+    ]);
+    intake.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 12, 0.055, 10), MATERIALS.steel));
+  }
+  enginePart.add(intake);
+
+  /* Timing cover + crank pulley with belt grooves */
+  const front = new THREE.Group();
+  front.userData.explodeDir = new THREE.Vector3(1, 0.1, 0).normalize();
+  const timingGeo = new THREE.ExtrudeGeometry(roundedRectShape(0.55, 0.7, 0.08), { depth: 0.08, bevelEnabled: false });
+  timingGeo.center();
+  const timing = new THREE.Mesh(timingGeo, MATERIALS.darkSteel);
+  timing.rotation.y = Math.PI / 2;
+  timing.position.x = 0.92;
+  front.add(timing);
+  const pulley = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.12, 32), MATERIALS.steel);
+  pulley.rotation.z = Math.PI / 2;
+  pulley.position.x = 1.03;
+  front.add(pulley);
+  const grooveGeo = new THREE.TorusGeometry(0.245, 0.013, 6, 32);
+  for (const gx of [1.05, 1.1]) {
+    const groove = new THREE.Mesh(grooveGeo, MATERIALS.darkSteel);
+    groove.rotation.y = Math.PI / 2;
+    groove.position.x = gx;
+    front.add(groove);
+  }
+  const bolt = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.05, 6), MATERIALS.chrome);
+  bolt.rotation.z = Math.PI / 2;
+  bolt.position.x = 1.11;
+  front.add(bolt);
+  enginePart.add(front);
+
+  enginePart.position.set(0.9, 0.55, -0.9);
+  enginePart.rotation.y = -0.4;
+}
+
+/* ---- PART: Performance Wheel ---- */
+const wheelPart = makePart('Performance Wheel', 'WHL-19X-9.5', {
+  'Material': 'Flow-Formed Alloy',
+  'Size': '19" × 9.5J',
+  'Offset': 'ET35',
+  'Tire': '275/35 R19 (Soft Compound)',
+  'Weight': '10.8 kg',
+}, { label: 'Critical', color: 'var(--danger)' });
+{
+  /* Tire lathed from a real cross-section profile + tread blocks */
+  const tire = new THREE.Group();
+  tire.userData.explodeDir = new THREE.Vector3(0, 0, 1);
+  const profile = [
+    [0.78, -0.28], [0.95, -0.34], [1.08, -0.34], [1.16, -0.26],
+    [1.19, -0.1], [1.19, 0.1], [1.16, 0.26], [1.08, 0.34],
+    [0.95, 0.34], [0.78, 0.28],
+  ].map(([x, y]) => new THREE.Vector2(x, y));
+  const tireMesh = new THREE.Mesh(new THREE.LatheGeometry(profile, 48), MATERIALS.rubber);
+  tireMesh.rotation.x = Math.PI / 2;
+  tire.add(tireMesh);
+  const treadGeo = new THREE.BoxGeometry(0.1, 0.05, 0.09);
+  for (let i = 0; i < 20; i++) {
+    const a = (i / 20) * Math.PI * 2;
+    for (const zs of [0.09, -0.09]) {
+      const treadBlock = new THREE.Mesh(treadGeo, MATERIALS.rubber);
+      treadBlock.position.set(Math.cos(a) * 1.185, Math.sin(a) * 1.185, zs);
+      treadBlock.rotation.z = a + Math.PI / 2;
+      tire.add(treadBlock);
+    }
+  }
+  wheelPart.add(tire);
+
+  /* Rim barrel, twin spokes, hub face, centre cap and lugs */
+  const rim = new THREE.Group();
+  rim.userData.explodeDir = new THREE.Vector3(0, 0, 0.45);
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.82, 0.82, 0.58, 48, 1, true), MATERIALS.lightAlloy);
+  barrel.rotation.x = Math.PI / 2;
+  rim.add(barrel);
+  const lipGeo = new THREE.TorusGeometry(0.82, 0.03, 8, 48);
+  for (const zs of [0.29, -0.29]) {
+    const lip = new THREE.Mesh(lipGeo, MATERIALS.lightAlloy);
+    lip.position.z = zs;
+    rim.add(lip);
+  }
+  const spokeGeo = new THREE.BoxGeometry(0.62, 0.09, 0.07);
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2;
+    for (const off of [-0.075, 0.075]) {
+      const spoke = new THREE.Mesh(spokeGeo, MATERIALS.lightAlloy);
+      spoke.position.set(
+        Math.cos(a) * 0.5 - Math.sin(a) * off,
+        Math.sin(a) * 0.5 + Math.cos(a) * off,
+        0.22
+      );
+      spoke.rotation.z = a + Math.PI / 2 + off * 0.8;
+      rim.add(spoke);
+    }
+  }
+  const hubFace = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.08, 24), MATERIALS.lightAlloy);
+  hubFace.rotation.x = Math.PI / 2;
+  hubFace.position.z = 0.26;
+  rim.add(hubFace);
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.05, 24), MATERIALS.darkSteel);
+  cap.rotation.x = Math.PI / 2;
+  cap.position.z = 0.3;
+  rim.add(cap);
+  const lugGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.07, 6);
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2 + 0.3;
+    const lug = new THREE.Mesh(lugGeo, MATERIALS.chrome);
+    lug.position.set(Math.cos(a) * 0.21, Math.sin(a) * 0.21, 0.3);
+    lug.rotation.x = Math.PI / 2;
+    rim.add(lug);
+  }
+  const valve = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.09, 8), MATERIALS.chrome);
+  valve.position.set(0.62, 0.5, -0.27);
+  valve.rotation.x = Math.PI / 2;
+  rim.add(valve);
+  wheelPart.add(rim);
+
+  wheelPart.position.set(1.9, 1.0, 1.3);
+  wheelPart.rotation.y = -0.6;
+}
+
+const allParts = [discPart, caliperPart, enginePart, wheelPart];
+allParts.forEach(p => carModel.add(p));
+
+/* Assign explode directions + capture base positions per child.
+   Explode vectors radiate outward from each part's local origin. */
+function assignExplodeDirs(part) {
+  part.children.forEach(child => {
+    child.userData.basePos = child.position.clone();
+    // Assemblies may declare their own explode direction (with custom magnitude)
+    if (!child.userData.explodeDir) {
+      const dir = child.position.clone();
+      if (dir.lengthSq() < 1e-6) dir.set(0, 1, 0);
+      child.userData.explodeDir = dir.normalize();
+    }
+  });
+}
+allParts.forEach(assignExplodeDirs);
+
+// Every mesh casts and receives shadows
+carModel.traverse(o => {
+  if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; }
+});
+
+/* ---------------------------------------------------------------
+   5. POST-PROCESSING — neon cyan outline for selection
+   --------------------------------------------------------------- */
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+
+const outlinePass = new OutlinePass(
+  new THREE.Vector2(innerWidth, innerHeight), scene, camera);
+outlinePass.edgeStrength = 4;
+outlinePass.edgeGlow = 1.2;
+outlinePass.edgeThickness = 2;
+outlinePass.visibleEdgeColor.set('#00e5ff');
+outlinePass.hiddenEdgeColor.set('#003c46');
+composer.addPass(outlinePass);
+
+/* ---------------------------------------------------------------
+   6. INTERACTION — raycast selection + smooth camera focus
+   --------------------------------------------------------------- */
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+let selectedPart = null;
+let camTween = null;
+
+/** Walk up the scene tree to find the registered part group */
+function partFromObject(obj) {
+  let o = obj;
+  while (o) {
+    if (o.userData?.isPart) return o;
+    o = o.parent;
+  }
+  return null;
+}
+
+/** Tween camera position + orbit target (ease-out cubic) */
+function focusCamera(targetPoint, distance = 3.2) {
+  const dir = camera.position.clone().sub(controls.target).normalize();
+  const destPos = targetPoint.clone().add(dir.multiplyScalar(distance));
+  camTween = {
+    t: 0, dur: 0.9,
+    fromPos: camera.position.clone(), toPos: destPos,
+    fromTgt: controls.target.clone(), toTgt: targetPoint.clone(),
+  };
+}
+
+function selectPart(part) {
+  selectedPart = part;
+  const meshes = [];
+  part.traverse(o => { if (o.isMesh) meshes.push(o); });
+  outlinePass.selectedObjects = meshes;
+
+  const center = new THREE.Vector3();
+  new THREE.Box3().setFromObject(part).getCenter(center);
+  focusCamera(center);
+  showSpecPanel(part);
+}
+
+function deselect() {
+  selectedPart = null;
+  outlinePass.selectedObjects = [];
+  document.getElementById('spec-panel').classList.remove('open');
+  document.getElementById('reticle').classList.remove('locked');
+}
+
+// Distinguish a click from an orbit-drag: track pointer travel
+let downX = 0, downY = 0;
+canvas.addEventListener('pointerdown', e => { downX = e.clientX; downY = e.clientY; });
+canvas.addEventListener('pointerup', e => {
+  if (Math.hypot(e.clientX - downX, e.clientY - downY) > 6) return; // was a drag
+  pointer.x = (e.clientX / innerWidth) * 2 - 1;
+  pointer.y = -(e.clientY / innerHeight) * 2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObjects(carModel.children, true);
+  if (hits.length) {
+    const part = partFromObject(hits[0].object);
+    if (part) { selectPart(part); return; }
+  }
+  deselect();
+});
+
+/* ---------------------------------------------------------------
+   7. SPEC PANEL UI
+   --------------------------------------------------------------- */
+const panel    = document.getElementById('spec-panel');
+const statusEl = document.getElementById('spec-status');
+const wearBar  = document.getElementById('wear-bar');
+const wearVal  = document.getElementById('wear-val');
+const tempBar  = document.getElementById('temp-bar');
+const tempVal  = document.getElementById('temp-val');
+const reticle  = document.getElementById('reticle');
+const tickerEl = document.getElementById('tech-ticker');
+
+function showSpecPanel(part) {
+  const { name, id, specs, status } = part.userData;
+  document.getElementById('spec-name').textContent = name;
+  document.getElementById('spec-id').textContent = 'ID: ' + id;
+
+  statusEl.textContent = '◉ ' + status.label;
+  statusEl.style.color = status.color;
+  statusEl.style.borderColor = status.color;
+
+  const rows = document.getElementById('spec-rows');
+  rows.innerHTML = '';
+  for (const [k, v] of Object.entries(specs)) {
+    const row = document.createElement('div');
+    row.className = 'spec-row';
+    row.innerHTML = `<span class="k">${k}</span><span class="v hl">${v}</span>`;
+    rows.appendChild(row);
+  }
+
+  // Deterministic pseudo-random telemetry per part id
+  const seed = [...id].reduce((a, c) => a + c.charCodeAt(0), 0);
+  const wear = seed % 60 + 8;
+  const temp = (seed % 180) + 35;
+  wearVal.textContent = wear + '%';
+  tempVal.textContent = temp + '°C';
+  wearBar.style.width = tempBar.style.width = '0%';
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    wearBar.className = 'bar-fill' + (wear > 65 ? ' bad' : wear > 40 ? ' warn' : '');
+    wearBar.style.width = wear + '%';
+    tempBar.className = 'bar-fill' + (temp > 160 ? ' bad' : temp > 110 ? ' warn' : '');
+    tempBar.style.width = Math.min(100, temp / 2) + '%';
+  }));
+
+  startTicker(id);
+  panel.classList.add('open');
+  reticle.classList.add('locked');
+}
+
+/* Teletype-style diagnostic readout */
+let tickerTimer = null;
+function startTicker(id) {
+  clearInterval(tickerTimer);
+  const lines = [
+    `> SCANNING ${id}...`,
+    `> ULTRASONIC PROBE ......... OK`,
+    `> THERMAL MAP ACQUIRED ..... OK`,
+    `> MICRO-FRACTURE DETECTION . ${Math.random() > 0.5 ? 'CLEAN' : '1 ANOMALY'}`,
+    `> DIAGNOSTIC COMPLETE.`,
+  ];
+  const text = lines.join('\n');
+  let i = 0;
+  tickerEl.innerHTML = '';
+  const span = document.createElement('span');
+  const cursor = document.createElement('span');
+  cursor.className = 'cursor';
+  cursor.textContent = '█';
+  tickerEl.append(span, cursor);
+  tickerTimer = setInterval(() => {
+    span.textContent = text.slice(0, ++i);
+    if (i >= text.length) clearInterval(tickerTimer);
+  }, 14);
+}
+
+document.getElementById('spec-close').addEventListener('click', deselect);
+
+/* ---------------------------------------------------------------
+   8. EXPLODED VIEW — smooth eased animation of child offsets
+   --------------------------------------------------------------- */
+let exploded = false;
+let explodeT = 0;
+const btnExplode = document.getElementById('btn-explode');
+
+btnExplode.addEventListener('click', () => {
+  exploded = !exploded;
+  btnExplode.classList.toggle('active', exploded);
+  btnExplode.textContent = exploded ? 'Assemble View' : 'Explode View';
+});
+
+function applyExplode(dt) {
+  const target = exploded ? 1 : 0;
+  explodeT += (target - explodeT) * Math.min(1, dt * 4);
+  if (Math.abs(target - explodeT) < 0.001) explodeT = target;
+
+  if (explodeT === 0 && !exploded) {
+    // Snap exactly home when fully retracted (cheap early-out)
+    for (const part of allParts)
+      for (const c of part.children) c.position.copy(c.userData.basePos);
+    return;
+  }
+  for (const part of allParts)
+    for (const c of part.children)
+      c.position.copy(c.userData.basePos).addScaledVector(c.userData.explodeDir, explodeT * 1.1);
+}
+
+/* ---------------------------------------------------------------
+   9. OTHER CONTROLS
+   --------------------------------------------------------------- */
+let autoRotate = false;
+const btnRotate = document.getElementById('btn-auto-rotate');
+btnRotate.addEventListener('click', () => {
+  autoRotate = !autoRotate;
+  controls.autoRotate = autoRotate;
+  controls.autoRotateSpeed = 1.5;
+  btnRotate.classList.toggle('active', autoRotate);
+});
+
+document.getElementById('btn-reset').addEventListener('click', () => {
+  deselect();
+  camTween = {
+    t: 0, dur: 0.9,
+    fromPos: camera.position.clone(), toPos: HOME_POS.clone(),
+    fromTgt: controls.target.clone(), toTgt: HOME_TARGET.clone(),
+  };
+});
+
+/* ---- Background color picker ---- */
+const btnBg    = document.getElementById('btn-bg');
+const bgPop    = document.getElementById('bg-pop');
+const bgPicker = document.getElementById('bg-picker');
+
+function setBackground(hex) {
+  const c = new THREE.Color(hex);
+  scene.background = c;
+  scene.fog.color.copy(c);
+  // Perceptual luminance: on bright backgrounds switch to darker grid lines
+  const lum = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+  buildGrid(lum > 0.3);
+}
+
+btnBg.addEventListener('click', () => {
+  bgPop.classList.toggle('open');
+  btnBg.classList.toggle('active', bgPop.classList.contains('open'));
+});
+
+// Preset swatches
+document.querySelectorAll('.swatch').forEach(sw => {
+  sw.addEventListener('click', () => {
+    document.querySelectorAll('.swatch').forEach(s => s.classList.remove('selected'));
+    sw.classList.add('selected');
+    bgPicker.value = sw.dataset.bg;
+    setBackground(sw.dataset.bg);
+  });
+});
+
+// Free-form custom color
+bgPicker.addEventListener('input', () => {
+  document.querySelectorAll('.swatch').forEach(s => s.classList.remove('selected'));
+  setBackground(bgPicker.value);
+});
+
+// Click anywhere outside the popup closes it
+document.addEventListener('pointerdown', e => {
+  if (!bgPop.contains(e.target) && !btnBg.contains(e.target)) {
+    bgPop.classList.remove('open');
+    btnBg.classList.remove('active');
+  }
+});
+
+/* ---------------------------------------------------------------
+   10. HUD CLOCK + RETICLE PROJECTION
+   --------------------------------------------------------------- */
+setInterval(() => {
+  document.getElementById('clock').textContent =
+    new Date().toLocaleTimeString('en-GB');
+}, 1000);
+
+const reticleCenter = new THREE.Vector3();
+function updateReticle() {
+  if (!selectedPart) return;
+  new THREE.Box3().setFromObject(selectedPart).getCenter(reticleCenter);
+  reticleCenter.project(camera);
+  reticle.style.left = ((reticleCenter.x + 1) / 2 * innerWidth) + 'px';
+  reticle.style.top  = ((-reticleCenter.y + 1) / 2 * innerHeight) + 'px';
+}
+
+/* ---------------------------------------------------------------
+   11. MAIN LOOP
+   --------------------------------------------------------------- */
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+
+  if (camTween) {
+    camTween.t += dt / camTween.dur;
+    const k = Math.min(camTween.t, 1);
+    const e = 1 - Math.pow(1 - k, 3);
+    camera.position.lerpVectors(camTween.fromPos, camTween.toPos, e);
+    controls.target.lerpVectors(camTween.fromTgt, camTween.toTgt, e);
+    if (k >= 1) camTween = null;
+  }
+
+  // Idle showcase spin (pauses while a part is focused or exploded)
+  if (!selectedPart && !exploded) carModel.rotation.y += dt * 0.12;
+
+  applyExplode(dt);
+  controls.update();
+  updateReticle();
+  composer.render();
+}
+animate();
+
+/* ---------------------------------------------------------------
+   12. RESIZE
+   --------------------------------------------------------------- */
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  composer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
